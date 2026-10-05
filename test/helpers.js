@@ -5,6 +5,11 @@ import { createAdexClient } from '../server/adex.js';
 import { createMetaClient } from '../server/meta.js';
 import { createUtmifyClient } from '../server/utmify.js';
 import { openDb } from '../server/db.js';
+import { catalog } from '../server/catalog.js';
+
+export const P1 = catalog.product.price; // 1 unidade (centavos)
+export const P2 = catalog.product.kit2_price ?? Math.round(P1 * 1.8); // 2 unidades
+export const pix5 = (c) => Math.round(c * 0.05);
 
 export const PRODUCT_ID = '2bc65fc1-023e-4c6e-a5bb-8fed24b86f8e';
 export const SECRET = 'sk_test_secret';
@@ -87,8 +92,7 @@ const unit = (o = {}) => ({ view: 'front', category: 'pickup', brand: 'Toyota', 
 // Corpo igual ao que o checkout do site envia para um kit de N unidades (1 ou 2), Pix.
 export function checkoutBody({ units = [unit()], shippingCents = 0, couponCode = null, attemptId = crypto.randomUUID(), amount } = {}) {
   const n = units.length;
-  const base = 29310;
-  const unitPrice = n === 2 ? Math.round(base * 1.8) : base;
+  const unitPrice = n === 2 ? P2 : P1;
   const subtotal = unitPrice;
   const pix = Math.round(subtotal * 0.05);
   const coupon = couponCode ? Math.round(subtotal * 0.1) : 0;

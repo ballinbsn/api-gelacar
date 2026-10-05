@@ -6,24 +6,25 @@ import { emvAmountCents } from '../server/emv.js';
 import { mapAdexStatus, verifyAdexSignature } from '../server/adex.js';
 import { buildUserData } from '../server/meta.js';
 import { isValidCpf, isValidCnpj } from '../server/orders.js';
-import { PRODUCT_ID, fakePixCode, sign } from './helpers.js';
+import { PRODUCT_ID, fakePixCode, sign, P1, P2, pix5 } from './helpers.js';
 
 const item = (o = {}) => ({ id: PRODUCT_ID, quantity: 1, ...o });
 
-test('preço do kit: 1 = base, 2 = 1,8x, 3 = 2,5x', () => {
-  assert.equal(kitPrice(29310, 1), 29310);
-  assert.equal(kitPrice(29310, 2), 52758);
-  assert.equal(kitPrice(29310, 3), 73275);
+test('preço do kit: 1 = base, 2 = valor fixo do catálogo (ou 1,8x), 3 = 2,5x', () => {
+  assert.equal(kitPrice({ price: 29310 }, 1), 29310);
+  assert.equal(kitPrice({ price: 29310 }, 2), 52758);
+  assert.equal(kitPrice({ price: 17990, kit2_price: 31990 }, 2), 31990);
+  assert.equal(kitPrice({ price: 29310 }, 3), 73275);
 });
 
 test('priceOrder reproduz o checkout do site (Pix 5%, cupom 10%, SEDEX)', () => {
   const a = priceOrder({ items: [item()], shippingCents: 0 });
-  assert.equal(a.subtotal, 29310);
-  assert.equal(a.pixDiscount, 1466);
-  assert.equal(a.total, 27844);
+  assert.equal(a.subtotal, P1);
+  assert.equal(a.pixDiscount, pix5(P1));
+  assert.equal(a.total, P1 - pix5(P1));
   const b = priceOrder({ items: [item({ kitQty: 2 })], shippingCents: 1939, couponCode: 'prime10' });
-  assert.equal(b.subtotal, 52758);
-  assert.equal(b.total, 52758 + 1939 - 2638 - 5276);
+  assert.equal(b.subtotal, P2);
+  assert.equal(b.total, P2 + 1939 - pix5(P2) - Math.round(P2 * 0.1));
   assert.equal(b.unitsCount, 2);
 });
 

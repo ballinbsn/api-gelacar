@@ -35,6 +35,7 @@ function project(rows, select) {
   if (!select || select === '*') return rows;
   const cols = select.split(',').map((c) => c.trim().split(':').pop()).filter(Boolean);
   if (cols.includes('*')) return rows;
+  if (cols.includes('offer_mode')) cols.push('kit2_price', 'kit2_compare_at_price');
   return rows.map((r) => Object.fromEntries(cols.map((c) => [c, r[c]])));
 }
 

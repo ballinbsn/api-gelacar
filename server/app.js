@@ -11,6 +11,7 @@ import { createUtmifyClient } from './utmify.js';
 import { createOrderService } from './orders.js';
 import { createPostgrestMock } from './postgrest.js';
 import { OrderError } from './pricing.js';
+import { catalog } from './catalog.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, '..', 'public');
@@ -193,7 +194,7 @@ export function createApp({ config = loadConfig(), deps = {}, log = console } = 
 
   // ------------------------------------------------------------------ site
   const gcJson = () =>
-    JSON.stringify({ utmifyPixelId: config.utmify.pixelId || null, cardEnabled: config.checkout.cardEnabled }).replace(/</g, '\\u003c');
+    JSON.stringify({ utmifyPixelId: config.utmify.pixelId || null, cardEnabled: config.checkout.cardEnabled, kit2Price: catalog.product.kit2_price ?? null }).replace(/</g, '\\u003c');
   // Só para testes automatizados: troca o fbq real por um registrador (nada é enviado à Meta pelo navegador).
   const gcExtra = () =>
     config.debug.fbqStub

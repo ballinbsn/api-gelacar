@@ -10,8 +10,12 @@ export const COUPONS = { PRIME10: { pct: 10 } };
 export const GIFT_WRAP_CENTS = 500;
 
 // Preço do kit: 1 un = preço; 2 un = 1,8x; 3 un = 2,5x (função Bh do carrinho original).
-export function kitPrice(base, qty) {
-  return qty >= 3 ? Math.round(base * 2.5) : qty === 2 ? Math.round(base * 1.8) : base;
+// O catálogo pode fixar o preço de 2 unidades (kit2_price); sem ele vale a regra original (1,8x).
+export function kitPrice(product, qty) {
+  const base = product.price;
+  if (qty >= 3) return Math.round(base * 2.5);
+  if (qty === 2) return product.kit2_price ?? Math.round(base * 1.8);
+  return base;
 }
 
 export class OrderError extends Error {
@@ -41,7 +45,7 @@ export function priceOrder({ items, shippingCents, couponCode, giftWrapCents }) 
     const kitQty = Math.floor(Number(it.kitQty) || 1);
     if (quantity < 1 || quantity > 10) throw new OrderError('bad_quantity', 'Quantidade inválida');
     if (kitQty < 1 || kitQty > 3) throw new OrderError('bad_quantity', 'Quantidade inválida');
-    const unitPrice = kitQty > 1 ? kitPrice(product.price, kitQty) : product.price;
+    const unitPrice = kitQty > 1 ? kitPrice(product, kitQty) : product.price;
     const units = kitQty > 1 ? kitQty * quantity : quantity;
     subtotal += unitPrice * quantity;
     lines.push({ product, quantity, kitQty, unitPrice, units });

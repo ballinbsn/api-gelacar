@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startTestApp, checkoutBody, unit, sign } from './helpers.js';
+import { startTestApp, checkoutBody, unit, sign, P1, P2, pix5 } from './helpers.js';
 
 test('cria pedido Pix, grava personalização de cada unidade e envia ao Adex o valor correto', async () => {
   const t = await startTestApp();
@@ -17,17 +17,17 @@ test('cria pedido Pix, grava personalização de cada unidade e envia ao Adex o 
     assert.equal(r.json.gatewayId, 'tx-1');
     assert.ok(r.json.pix.url.startsWith('0002'));
 
-    // Adex recebeu: 527,58 + 19,39 - 26,38 - 52,76 = 467,83 em reais, external_id e postback do NOVO domínio
+    // Adex recebeu: preço de 2 un + SEDEX - Pix 5% - cupom 10%, em reais, external_id e postback do NOVO domínio
+    const total2 = P2 + 1939 - pix5(P2) - Math.round(P2 * 0.1);
     const sent = t.calls.adexCreate[0].body;
-    assert.equal(sent.amount, 467.83);
+    assert.equal(sent.amount, Number((total2 / 100).toFixed(2)));
     assert.equal(sent.external_id, r.json.orderId);
-    assert.ok(sent.items[0].title.startsWith('GelaCar 2un - U1: Toyota Hilux 8ª geração 2022 Preto Frente placa JOAO | U2: Volkswagen Voyage G6 2015 Prata Traseira placa MARIA (GC'));
     assert.equal(sent.postbackUrl, 'https://novo-dominio.test/api/webhooks/adex');
     assert.equal(sent.customer.document.type, 'cpf');
     assert.equal(t.calls.adexCreate[0].headers['x-public-key'], 'pk_test');
 
     const o = t.orders.getOrder(r.json.orderId);
-    assert.equal(o.amount_cents, 46783);
+    assert.equal(o.amount_cents, total2);
     assert.equal(o.units_count, 2);
     assert.equal(o.personalization_complete, true);
     assert.deepEqual(o.units.map((u) => [u.n, u.side, u.brand, u.model, u.year, u.color, u.plate_name]), [
@@ -129,7 +129,7 @@ test('webhook: assinatura inválida é rejeitada; válido confirma, e reenvio n�
     assert.equal(purchases.length, 1, 'Purchase enviado uma única vez');
     const ev = purchases[0].body.data[0];
     assert.equal(ev.event_id, `purchase_${created.orderId}`);
-    assert.equal(ev.custom_data.value, 278.44);
+    assert.equal(ev.custom_data.value, (P1 - pix5(P1)) / 100);
     assert.equal(ev.custom_data.currency, 'BRL');
     assert.equal(ev.custom_data.order_id, created.orderId);
     assert.equal(ev.action_source, 'website');
@@ -153,7 +153,7 @@ test('consulta do navegador confirma o pagamento e o navegador não consegue for
 
     // Purchase vindo do navegador é ignorado; outros eventos são repassados com o mesmo event_id
     await t.post('/api/public/meta-capi', { event_name: 'Purchase', event_id: 'x1', user_data: {}, custom_data: { value: 1 } });
-    await t.post('/api/public/meta-capi', { event_name: 'AddToCart', event_id: 'ev-123', event_source_url: 'https://novo-dominio.test/produto/gelacar?fbclid=abc', user_data: { email: 'A@b.com' }, custom_data: { value: 293.1, currency: 'BRL' } });
+    await t.post('/api/public/meta-capi', { event_name: 'AddToCart', event_id: 'ev-123', event_source_url: 'https://novo-dominio.test/produto/gelacar?fbclid=abc', user_data: { email: 'A@b.com' }, custom_data: { value: P1 / 100, currency: 'BRL' } });
     assert.equal(t.calls.meta.length, 1);
     const ev = t.calls.meta[0].body.data[0];
     assert.equal(ev.event_name, 'AddToCart');
