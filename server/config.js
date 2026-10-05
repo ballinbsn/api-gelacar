@@ -14,7 +14,7 @@ export function loadConfig(env = process.env) {
     // true = JS/CSS com cache de 1 ano (só ative se nunca mais reconstruir public/ com o mesmo nome de arquivo)
     assetsImmutable: bool(env.ASSETS_IMMUTABLE, false),
     // Domínio do site estático que chama esta API (ex.: https://seudominio.com.br). Vazio = só mesma origem.
-    corsOrigin: withProto(str(env.CORS_ORIGIN) || str(env.FUNNEL_URL)).replace(/\/+$/, ''),
+    corsOrigin: withProto(str(env.CORS_ORIGIN)).replace(/\/+$/, ''),
     dataDir: str(env.DATA_DIR) || './data',
     adminToken: str(env.ADMIN_TOKEN),
 

@@ -44,14 +44,13 @@ export function createApp({ config = loadConfig(), deps = {}, log = console } = 
     next();
   });
 
-  // Site estático em outro domínio chamando esta API (config.js → apiBase): libere o domínio do site em CORS_ORIGIN.
-  if (config.corsOrigin) {
-    app.use('/api/public', (req, res, next) => {
-      res.set({ 'Access-Control-Allow-Origin': config.corsOrigin, 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS', Vary: 'Origin' });
-      if (req.method === 'OPTIONS') return res.status(204).end();
-      next();
-    });
-  }
+  // O site (páginas) fica em outro domínio e chama esta API. Sem CORS_ORIGIN, qualquer origem pode chamar
+  // (o checkout não usa cookies de login). Para restringir, defina CORS_ORIGIN=https://seusite.com.br.
+  app.use('/api/public', (req, res, next) => {
+    res.set({ 'Access-Control-Allow-Origin': config.corsOrigin || '*', 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS', Vary: 'Origin' });
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    next();
+  });
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
