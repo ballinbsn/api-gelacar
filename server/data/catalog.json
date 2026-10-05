@@ -1,13 +1,13 @@
 {
   "settings": {
-    "logo_white": "/img/store_logo_white-1790528341419-kv4jkb.png",
+    "logo_white": "/img/gelacar-logo-white.png",
     "banner_hero_desktop": "/img/store_banner_hero_desktop-1790566815866-dgvwqr.webp",
     "banner_hero_mobile": "/img/store_banner_hero_mobile-1790566818627-xotmlu.webp",
     "contact_email": "contato@nacionalprimes.com",
     "social_facebook": "@61595025354128",
     "social_instagram": "@nacionalprimes",
     "brand_color": "#111111",
-    "logo": "/img/store_logo-1791047377946-b0psah.png"
+    "logo": "/img/gelacar-logo.png"
   },
   "product": {
     "id": "2bc65fc1-023e-4c6e-a5bb-8fed24b86f8e",
