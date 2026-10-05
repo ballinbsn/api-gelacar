@@ -178,6 +178,16 @@ export function createApp({ config = loadConfig(), deps = {}, log = console } = 
   app.get('/api/admin/orders', adminAuth, (req, res) => {
     res.json(orders.listOrders({ limit: Math.min(Number(req.query.limit) || 100, 500), status: req.query.status || undefined }));
   });
+  // Gera um Pix de teste (R$ 1 a R$ 50) para validar Adex + webhook sem mexer no preço do produto.
+  app.post('/api/admin/test-pix', adminAuth, jsonBody, async (req, res) => {
+    try {
+      res.json(await orders.createTestPix({ amountCents: req.body?.amountCents ?? 100, customer: req.body?.customer }));
+    } catch (e) {
+      if (e instanceof OrderError) return res.status(e.status).json({ error: e.message, code: e.code });
+      log.error?.('[test-pix]', e);
+      res.status(500).json({ error: 'Erro interno' });
+    }
+  });
   app.get('/admin/pedidos', adminAuth, (req, res) => {
     const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
     const rows = orders.listOrders({ limit: 200, status: req.query.status || undefined }).map((o) => {

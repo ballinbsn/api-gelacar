@@ -8,6 +8,8 @@ import { buildUserData, fbcFromClickId } from './meta.js';
 const onlyDigits = (v) => String(v ?? '').replace(/\D/g, '');
 const clean = (v, max = 200) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const nowIso = () => new Date().toISOString();
+// Pedidos de teste (R$ 1 etc.) têm id GCTEST... e nunca disparam Pixel/CAPI/UTMify.
+const isTest = (id) => String(id).startsWith('GCTEST');
 const json = (v) => JSON.stringify(v ?? null);
 
 export function isValidCpf(value) {
@@ -103,8 +105,8 @@ export function createOrderService({ config, db, adex, meta, utmify, log = conso
     utmifyWaiting: db.prepare('UPDATE orders SET utmify_waiting_sent_at = ? WHERE id = ? AND utmify_waiting_sent_at IS NULL'),
     utmifyPaid: db.prepare('UPDATE orders SET utmify_paid_sent_at = ? WHERE id = ? AND utmify_paid_sent_at IS NULL'),
     capiLog: db.prepare('INSERT INTO capi_log (created_at, order_id, event_name, event_id, ok, response) VALUES (?, ?, ?, ?, ?, ?)'),
-    pendingCapi: db.prepare(`SELECT id FROM orders WHERE status = 'PAID' AND capi_purchase_sent_at IS NULL AND capi_purchase_attempts < 8 AND paid_at > ?`),
-    pendingUtmifyPaid: db.prepare(`SELECT id FROM orders WHERE status = 'PAID' AND utmify_paid_sent_at IS NULL AND paid_at > ?`),
+    pendingCapi: db.prepare(`SELECT id FROM orders WHERE status = 'PAID' AND id NOT LIKE 'GCTEST%' AND capi_purchase_sent_at IS NULL AND capi_purchase_attempts < 8 AND paid_at > ?`),
+    pendingUtmifyPaid: db.prepare(`SELECT id FROM orders WHERE status = 'PAID' AND id NOT LIKE 'GCTEST%' AND utmify_paid_sent_at IS NULL AND paid_at > ?`),
   };
 
   const getOrder = (id) => rowToOrder(q.byId.get(id));
@@ -264,7 +266,7 @@ export function createOrderService({ config, db, adex, meta, utmify, log = conso
     const order = getOrder(id);
     log.info?.('[order] criado', { id, gateway_id: pix.transactionId, total: priced.total, unidades: units.length });
 
-    if (utmify.enabled()) {
+    if (utmify.enabled() && !isTest(id)) {
       utmify.sendOrder(order, 'waiting_payment').then((r) => {
         if (r.ok) q.utmifyWaiting.run(nowIso(), id);
         else log.warn?.('[utmify] waiting_payment falhou', id, r.status || r.error);
@@ -273,9 +275,39 @@ export function createOrderService({ config, db, adex, meta, utmify, log = conso
     return responseFor(order);
   }
 
+  // Pix de teste com valor livre (protegido por ADMIN_TOKEN na rota). Mesmo caminho real da Adex e do webhook.
+  async function createTestPix({ amountCents = 100, customer: c = {} } = {}) {
+    amountCents = Math.floor(Number(amountCents));
+    if (!(amountCents >= 100 && amountCents <= 5000)) throw new OrderError('bad_amount', 'Valor de teste deve ficar entre R$ 1,00 e R$ 50,00');
+    const customer = { name: clean(c.name, 120) || 'Teste GelaCar', email: clean(c.email, 160) || 'teste@gelacar.shop', phone: onlyDigits(c.phone) || '11999999999', document: onlyDigits(c.document) || '52998224725', documentType: 'CPF' };
+    if (!isValidCpf(customer.document)) throw new OrderError('bad_document', 'CPF inválido');
+    const address = { zip: '01310100', street: 'Avenida Paulista', number: '1000', complement: '', neighborhood: 'Bela Vista', city: 'São Paulo', state: 'SP' };
+    const id = `GCTEST${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+    const ts = nowIso();
+    q.insert.run(id, `test-${id}`, ts, ts, amountCents, amountCents, 0, 'correios', 0, null, 0, 0, json(customer), json(address),
+      json([{ id: 'teste', slug: 'teste', title: 'TESTE de Pix GelaCar', quantity: 1, kitQty: 1, unitPriceCents: amountCents, units: 0, variant: null }]),
+      json([]), 0, 0, json({}), json({ test: true }), 'adex', json(['PEDIDO DE TESTE']));
+    let pix;
+    try {
+      if (config.adex.mock) pix = { transactionId: `mock-${id}`, code: mockPixCode(amountCents, id), expiresAt: new Date(Date.now() + 15 * 60_000).toISOString() };
+      else {
+        if (!adex.configured()) throw Object.assign(new Error('adex_not_configured'), { detail: 'ADEX_PUBLIC_KEY/ADEX_SECRET_KEY ausentes' });
+        pix = await adex.createPix({ orderId: id, amountCents, customer, address, title: `TESTE Pix GelaCar (${id})`, document: { number: customer.document, type: 'cpf' } });
+      }
+      if (!pix.code) throw Object.assign(new Error('no_pix_code'), { detail: 'Adex não devolveu o código Pix' });
+      const embedded = emvAmountCents(pix.code);
+      if (config.adex.verifyEmv && embedded !== null && embedded !== amountCents) throw Object.assign(new Error('emv_amount_mismatch'), { detail: `valor no Pix=${embedded} centavos, esperado=${amountCents}` });
+    } catch (e) {
+      q.failCreate.run(`test-${id}:failed:${Date.now()}`, json(['PEDIDO DE TESTE', `falha: ${e.message}`]), nowIso(), id);
+      throw new OrderError('gateway_error', `Adex recusou o Pix de teste: ${e.message}${e.detail ? ' ' + JSON.stringify(e.detail).slice(0, 300) : ''}`, 502);
+    }
+    q.setGateway.run(pix.transactionId, pix.code, pix.expiresAt, nowIso(), id);
+    return { orderId: id, gatewayId: pix.transactionId, amountCents, pixCode: pix.code, expiresAt: pix.expiresAt };
+  }
+
   async function sendPurchase(orderId) {
     const o = getOrder(orderId);
-    if (!o || o.status !== 'PAID' || o.capi_purchase_sent_at || !meta.enabled()) return;
+    if (!o || isTest(o.id) || o.status !== 'PAID' || o.capi_purchase_sent_at || !meta.enabled()) return;
     q.capiAttempt.run(o.id);
     const [first, ...rest] = o.customer.name.split(' ');
     const userData = buildUserData(
@@ -309,7 +341,7 @@ export function createOrderService({ config, db, adex, meta, utmify, log = conso
   async function afterPaid(orderId) {
     await sendPurchase(orderId).catch((e) => log.error?.('[meta-capi] erro', e.message));
     const o = getOrder(orderId);
-    if (o && utmify.enabled() && !o.utmify_paid_sent_at) {
+    if (o && !isTest(o.id) && utmify.enabled() && !o.utmify_paid_sent_at) {
       const r = await utmify.sendOrder(o, 'paid');
       if (r.ok) q.utmifyPaid.run(nowIso(), o.id);
       else log.warn?.('[utmify] paid falhou', o.id, r.status || r.error);
@@ -411,5 +443,5 @@ export function createOrderService({ config, db, adex, meta, utmify, log = conso
     return rows.map(rowToOrder);
   }
 
-  return { createOrder, checkStatus, handleWebhook, retryPendingEffects, simulatePaid, getOrder, listOrders, describeUnit };
+  return { createOrder, createTestPix, checkStatus, handleWebhook, retryPendingEffects, simulatePaid, getOrder, listOrders, describeUnit };
 }

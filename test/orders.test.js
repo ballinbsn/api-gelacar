@@ -204,3 +204,25 @@ test('painel de pedidos exige token', async () => {
     await t.close();
   }
 });
+
+test('Pix de teste: exige token, valida valor, cria na Adex e NÃO dispara Meta/UTMify ao ser pago', async () => {
+  const t = await startTestApp();
+  try {
+    assert.equal((await t.post('/api/admin/test-pix', { amountCents: 100 })).status, 401);
+    const auth = { authorization: 'Bearer admin_test' };
+    assert.equal((await t.post('/api/admin/test-pix', { amountCents: 50 }, auth)).status, 400);
+    const r = await t.post('/api/admin/test-pix', { amountCents: 100 }, auth);
+    assert.equal(r.status, 200, r.text);
+    assert.match(r.json.orderId, /^GCTEST/);
+    assert.equal(t.calls.adexCreate[0].body.amount, 1);
+    t.adexState.status = 'paid';
+    const payload = JSON.stringify({ event: 'pix.paid', data: { transaction_id: r.json.gatewayId } });
+    await t.post('/api/webhooks/adex', null, { 'x-webhook-signature': sign(payload) }, payload);
+    await new Promise((res) => setTimeout(res, 100));
+    assert.equal(t.orders.getOrder(r.json.orderId).status, 'PAID');
+    assert.equal(t.calls.meta.length, 0);
+    assert.equal(t.calls.utmify.length, 0);
+  } finally {
+    await t.close();
+  }
+});
