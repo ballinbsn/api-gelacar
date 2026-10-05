@@ -2,9 +2,9 @@ node_modules/
 .env
 .env.*
 !.env.example
-data/
+/data/
 tools/raw/
 *.log
 !.env.test
-data-test/
+/data-test/
 server-test.log
