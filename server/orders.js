@@ -227,7 +227,9 @@ export function createOrderService({ config, db, adex, meta, utmify, log = conso
       throw e;
     }
 
-    const title = (orderItems.map((i) => i.title).join(' + ') + ` (pedido ${id})`).slice(0, 250);
+    // Título visível no painel da Adex: produto + o que produzir (cada unidade) + id do pedido.
+    const unitsText = units.map((u) => `U${u.n}: ${(u.brand_model_text || `${u.brand} ${u.model}`).trim()} ${u.year} ${u.color} ${u.side} placa ${u.plate_name}`).join(' | ');
+    const title = `GelaCar ${units.length}un - ${unitsText} (${id})`.slice(0, 250);
     let pix;
     try {
       if (config.adex.mock) {

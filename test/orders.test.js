@@ -21,6 +21,7 @@ test('cria pedido Pix, grava personalização de cada unidade e envia ao Adex o 
     const sent = t.calls.adexCreate[0].body;
     assert.equal(sent.amount, 467.83);
     assert.equal(sent.external_id, r.json.orderId);
+    assert.ok(sent.items[0].title.startsWith('GelaCar 2un - U1: Toyota Hilux 8ª geração 2022 Preto Frente placa JOAO | U2: Volkswagen Voyage G6 2015 Prata Traseira placa MARIA (GC'));
     assert.equal(sent.postbackUrl, 'https://novo-dominio.test/api/webhooks/adex');
     assert.equal(sent.customer.document.type, 'cpf');
     assert.equal(t.calls.adexCreate[0].headers['x-public-key'], 'pk_test');
