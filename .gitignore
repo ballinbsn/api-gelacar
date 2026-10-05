@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+!.env.example
+data/
+tools/raw/
+*.log
+!.env.test
+data-test/
+server-test.log
