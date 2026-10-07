@@ -91,6 +91,8 @@ export function createOrderService({ config, db, adex, meta, utmify, log = conso
   const q = {
     byId: db.prepare('SELECT * FROM orders WHERE id = ?'),
     byAttempt: db.prepare('SELECT * FROM orders WHERE attempt_id = ?'),
+    upload: db.prepare('SELECT * FROM uploads WHERE id = ?'),
+    attachUpload: db.prepare('UPDATE uploads SET order_id = ? WHERE id = ? AND order_id IS NULL'),
     byGateway: db.prepare('SELECT * FROM orders WHERE gateway_id = ?'),
     insert: db.prepare(`INSERT INTO orders (id, attempt_id, created_at, updated_at, status, payment_method, amount_cents, subtotal_cents,
       shipping_cents, shipping_method, pix_discount_cents, coupon_code, coupon_discount_cents, gift_wrap_cents, customer, address, items, units,
@@ -191,6 +193,19 @@ export function createOrderService({ config, db, adex, meta, utmify, log = conso
     if (priced.total < 100) throw new OrderError('bad_amount', 'Valor do pedido inválido');
 
     const { units, warnings, complete } = buildUnits(items, priced.lines);
+    // Fotos de referência: só valem ids que o nosso upload gerou (e que ainda não pertencem a outro pedido)
+    const photoIds = [];
+    for (const u of units) {
+      if (!u.photo_id) continue;
+      const row = q.upload.get(u.photo_id);
+      if (!row || row.order_id) {
+        warnings.push(`unidade ${u.n}: foto ${u.photo_id} inválida ou já usada`);
+        u.photo_id = null;
+        continue;
+      }
+      u.photo_url = `${ctx.apiOrigin || ''}/f/${u.photo_id}`;
+      photoIds.push(u.photo_id);
+    }
     const orderItems = priced.lines.map((l, i) => ({
       id: l.product.id,
       slug: l.product.slug,
@@ -230,8 +245,9 @@ export function createOrderService({ config, db, adex, meta, utmify, log = conso
     }
 
     // Título visível no painel da Adex: produto + o que produzir (cada unidade) + id do pedido.
-    const unitsText = units.map((u) => `U${u.n}: ${(u.brand_model_text || `${u.brand} ${u.model}`).trim()} ${u.year} ${u.color} ${u.side} placa ${u.plate_name}`).join(' | ');
+    const unitsText = units.map((u) => `U${u.n}: ${(u.brand_model_text || `${u.brand} ${u.model}`).trim()} ${u.year ? u.year + ' ' : ''}${u.color} ${u.side} placa ${u.plate_name}${u.photo_id ? ' foto:' + u.photo_id : ''}`).join(' | ');
     const title = `GelaCar ${units.length}un - ${unitsText} (${id})`.slice(0, 250);
+    for (const pid of photoIds) q.attachUpload.run(id, pid);
     let pix;
     try {
       if (config.adex.mock) {

@@ -16,9 +16,13 @@ function normalizeUnit(u) {
     brand: clean(u.brand),
     model: clean(u.model),
     year: clean(u.year, 4),
-    color: clean(u.color, 40),
+    // "Outra": vale o texto digitado pelo cliente; `color_choice` guarda o que foi clicado
+    color: clean(u.color === 'Outra' ? u.colorOther || u.color : u.color, 40),
+    color_choice: clean(u.color, 40) || null,
     plate_name: clean(u.plateName ?? u.plate_name, 60),
     manual: !!u.manual,
+    // foto de referência opcional (id devolvido por /api/public/upload-photo; validado ao criar o pedido)
+    photo_id: /^[a-f0-9]{12}$/.test(String(u.photo?.id ?? u.photo_id ?? '')) ? String(u.photo?.id ?? u.photo_id) : null,
   };
   return out;
 }
@@ -49,7 +53,8 @@ export function parseUnitText(text) {
 export function unitIsComplete(u) {
   if (!u) return false;
   const hasVehicle = (u.brand && u.model) || u.brand_model_text;
-  return !!(u.side && hasVehicle && /^\d{4}$/.test(u.year) && u.color && u.plate_name);
+  // ano é opcional; tipo, cor, lado e nome da placa são obrigatórios
+  return !!(u.side && hasVehicle && (u.category || u.parsed_from_text) && (!u.year || /^\d{4}$/.test(u.year)) && u.color && u.plate_name);
 }
 
 // Monta a lista final de unidades do pedido, na ordem, com numeração contínua.
@@ -84,6 +89,6 @@ export function buildUnits(items, lines) {
 }
 
 export function describeUnit(u) {
-  const vehicle = u.brand_model_text || `${u.brand} ${u.model}`.trim();
-  return `Unidade ${u.n}: ${vehicle} ${u.year} • ${u.color} • ${u.side} • Placa: ${u.plate_name}`;
+  const vehicle = [u.brand_model_text || `${u.brand} ${u.model}`.trim(), u.year].filter(Boolean).join(' ');
+  return `Unidade ${u.n}: ${vehicle} • ${u.color} • ${u.side} • Placa: ${u.plate_name}${u.photo_id ? ' • Foto: sim' : ''}`;
 }

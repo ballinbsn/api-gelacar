@@ -72,6 +72,14 @@ export function openDb(dataDir) {
       event_type TEXT,
       data TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS uploads (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      ip TEXT,
+      mime TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      order_id TEXT
+    );
     CREATE TABLE IF NOT EXISTS capi_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       created_at TEXT NOT NULL,

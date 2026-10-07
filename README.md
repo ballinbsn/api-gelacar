@@ -17,3 +17,8 @@ O site (páginas) fica em outro lugar e chama esta API (`apiBase` no `config.js`
 
 ## Testes
 `npm install && npm test` (18 testes; nenhuma chamada real de rede).
+
+## Foto de referência do carro (opcional)
+`POST /api/public/upload-photo` (corpo = imagem JPEG/PNG/WEBP, até 4 MB; conteúdo conferido, 15 envios/hora por IP) grava em `DATA_DIR/uploads`
+(volume do Railway) e devolve `{ id, url }`. A foto é ligada ao pedido na criação (`photo_id`/`photo_url` na unidade) e o título do item na Adex leva `foto:<id>`.
+Para ver: `https://<DOMINIO_DA_API>/f/<id>`. Fotos nunca ligadas a um pedido são apagadas após 7 dias.

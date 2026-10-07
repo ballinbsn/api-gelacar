@@ -2,6 +2,7 @@ import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
 import { openDb } from './db.js';
@@ -85,6 +86,7 @@ export function createApp({ config = loadConfig(), deps = {}, log = console } = 
         userAgent: req.headers['user-agent'],
         cookie: req.headers.cookie,
         sourceUrl: `${origin(req)}/checkout`,
+        apiOrigin: `${req.protocol}://${req.get('host')}`,
       });
       res.json(out);
     } catch (e) {
@@ -153,6 +155,58 @@ export function createApp({ config = loadConfig(), deps = {}, log = console } = 
 
   // TikTok: o front mantém a chamada, mas esta operação não usa TikTok.
   app.post('/api/public/tiktok-capi', jsonBody, (_req, res) => res.status(204).end());
+  // ---- Foto de referência do carro (opcional). Fica no volume persistente (DATA_DIR/uploads) e é ligada ao
+  // pedido na criação. Aceita só JPEG/PNG/WebP (conferido pelo conteúdo, não pelo nome), até 4 MB.
+  const uploadsDir = path.join(config.dataDir === ':memory:' ? fs.mkdtempSync(path.join(os.tmpdir(), 'gc-up-')) : config.dataDir, 'uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  const insertUpload = db.prepare('INSERT INTO uploads (id, created_at, ip, mime, bytes) VALUES (?, ?, ?, ?, ?)');
+  const getUpload = db.prepare('SELECT * FROM uploads WHERE id = ?');
+  const sniff = (b) => {
+    if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { mime: 'image/jpeg', ext: 'jpg' };
+    if (b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { mime: 'image/png', ext: 'png' };
+    if (b.length > 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return { mime: 'image/webp', ext: 'webp' };
+    return null;
+  };
+  app.post(
+    '/api/public/upload-photo',
+    rateLimit(15, 60 * 60_000),
+    express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '4mb' }),
+    (req, res) => {
+      const body = req.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) return res.status(415).json({ error: 'Envie uma imagem JPG, PNG ou WEBP.' });
+      const kind = sniff(body);
+      if (!kind) return res.status(415).json({ error: 'Arquivo não reconhecido como imagem JPG, PNG ou WEBP.' });
+      const id = crypto.randomBytes(6).toString('hex');
+      fs.writeFileSync(path.join(uploadsDir, id + '.' + kind.ext), body);
+      insertUpload.run(id, new Date().toISOString(), clientIp(req), kind.mime, body.length);
+      res.json({ id, url: `${req.protocol}://${req.get('host')}/f/${id}`, bytes: body.length });
+    },
+  );
+  // Erros do upload (arquivo grande demais etc.) em JSON amigável
+  app.use('/api/public/upload-photo', (err, _req, res, next) => {
+    if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'A foto é grande demais (máximo 4 MB).' });
+    next(err);
+  });
+  app.get('/f/:id', (req, res) => {
+    const row = /^[a-f0-9]{12}$/.test(req.params.id) ? getUpload.get(req.params.id) : null;
+    if (!row) return res.status(404).type('text').send('Não encontrada');
+    const ext = row.mime === 'image/png' ? 'png' : row.mime === 'image/webp' ? 'webp' : 'jpg';
+    const file = path.join(uploadsDir, row.id + '.' + ext);
+    if (!fs.existsSync(file)) return res.status(404).type('text').send('Não encontrada');
+    res.set({ 'Content-Type': row.mime, 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'", 'Cache-Control': 'private, max-age=3600' });
+    fs.createReadStream(file).pipe(res);
+  });
+  // Fotos enviadas e nunca ligadas a um pedido (cliente desistiu) saem depois de 7 dias.
+  const purge = () => {
+    const cutoff = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+    for (const r of db.prepare('SELECT * FROM uploads WHERE order_id IS NULL AND created_at < ?').all(cutoff)) {
+      const ext = r.mime === 'image/png' ? 'png' : r.mime === 'image/webp' ? 'webp' : 'jpg';
+      fs.rmSync(path.join(uploadsDir, r.id + '.' + ext), { force: true });
+      db.prepare('DELETE FROM uploads WHERE id = ?').run(r.id);
+    }
+  };
+  setInterval(purge, 6 * 3600_000).unref?.();
+
   app.post('/api/public/truckbar-photo', (_req, res) => res.status(404).json({ error: 'indisponível' }));
 
   // Modo de teste (ADEX_MOCK=true): simula o pagamento de um pedido.
@@ -191,7 +245,7 @@ export function createApp({ config = loadConfig(), deps = {}, log = console } = 
   app.get('/admin/pedidos', adminAuth, (req, res) => {
     const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
     const rows = orders.listOrders({ limit: 200, status: req.query.status || undefined }).map((o) => {
-      const units = o.units.map((u) => `<li>${esc(orders.describeUnit(u))}${u.complete ? '' : ' ⚠️ incompleto'}</li>`).join('');
+      const units = o.units.map((u) => `<li>${esc(orders.describeUnit(u))}${u.photo_id ? ` <a href="/f/${esc(u.photo_id)}" target="_blank">ver foto</a>` : ''}${u.complete ? '' : ' ⚠️ incompleto'}</li>`).join('');
       return `<tr><td>${esc(o.id)}<br><small>${esc(o.created_at)}</small></td><td><b>${esc(o.status)}</b><br>R$ ${(o.amount_cents / 100).toFixed(2)}</td>
         <td>${esc(o.customer.name)}<br>${esc(o.customer.email)}<br>${esc(o.customer.phone)}<br>${esc(o.customer.documentType)} ${esc(o.customer.document)}</td>
         <td>${esc(o.address.street)}, ${esc(o.address.number)} ${esc(o.address.complement)}<br>${esc(o.address.neighborhood)} – ${esc(o.address.city)}/${esc(o.address.state)}<br>CEP ${esc(o.address.zip)}<br>${esc(o.shipping_method)}</td>
